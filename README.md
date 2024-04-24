@@ -1,7 +1,7 @@
 # Advanced-ML-Course
 
 ## Generative Modelling
-Diffusion Models, Auto Regressive Models (GPT2-)
+Diffusion Models, Auto Regressive Models (GPT-2)
 
 #### Training a 2D Diffusion Model:
 Developed a diffusion model composed of forward and reverse processes, implementing stochastic differential equations (SDE) to gradually convert inputs from their natural distribution to Gaussian distribution and vice versa. Utilized Variance Exploding (VE) process and trained a denoiser to reverse the diffusion process.
