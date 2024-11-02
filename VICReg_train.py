@@ -1,20 +1,18 @@
+import random
 import torch
 import torch.nn as nn
-from torchvision.models import resnet18
+import torch.nn.functional as F
 import torch.optim as optim
-import torchvision.transforms as transforms
+from torchvision.models import resnet18
 from torchvision.datasets import CIFAR10, MNIST
 from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
-import torch.nn.functional as F
+import torchvision.transforms as transforms
 import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.neighbors import NearestNeighbors
-from sklearn.metrics import roc_curve, auc
-import random
 from sklearn.metrics.pairwise import pairwise_distances
-
 
 
 class Encoder(nn.Module):
@@ -49,21 +47,41 @@ class Projector(nn.Module):
     def forward(self, x):
         return self.model(x)
 
-train_transform = transforms.Compose([
-    transforms.ToPILImage(),
-    transforms.RandomResizedCrop(32, scale=(0.2, 1.0)),
-    transforms.RandomHorizontalFlip(p=0.5),
-    transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1),
-    transforms.RandomGrayscale(p=0.2),
-    transforms.RandomApply([transforms.GaussianBlur(kernel_size=3)], p=0.5),
-    transforms.ToTensor(),
-    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
-])
-test_transform = transforms.Compose([
-    transforms.ToPILImage(),
-    transforms.ToTensor(),
-    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
-])
+
+def init_transforms():
+    train_transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.RandomResizedCrop(32, scale=(0.2, 1.0)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.RandomApply([transforms.GaussianBlur(kernel_size=3)], p=0.5),
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
+    ])
+    test_transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
+    ])
+    return train_transform, test_transform
+
+
+def init_dataset():
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    batch_size = 256
+    dataset = CIFAR10(root='./data', train=True, download=True, transform=transforms.ToTensor())
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    test_dataset = CIFAR10(root='./data', train=False, download=True, transform=transforms.ToTensor())
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    return device, batch_size, dataset, dataloader, test_dataset, test_dataloader
+
+
+def init_models(device):
+    encoder = Encoder(device=device).to(device)
+    projector = Projector().to(device)
+    return encoder, projector
+
 
 def invariance_loss(Z, Z_prime):
     return F.mse_loss(Z, Z_prime)
@@ -97,22 +115,11 @@ def covariance_loss(Z, Z_prime):
     return (cov_z_loss + cov_z_p_loss) / D
 
 
-
 def combined_loss(Z, Z_prime, gamma=25, mu=25, v=1):
     inv_loss = gamma * invariance_loss(Z, Z_prime)
     var_loss = mu * variance_loss(Z, Z_prime)
     cov_loss = v * covariance_loss(Z, Z_prime)
     return inv_loss, var_loss, cov_loss
-
-# ***Dataset*** prepare
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-batch_size = 256
-dataset = CIFAR10(root='./data', train=True, download=True, transform=transforms.ToTensor())
-dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-# init model
-encoder = Encoder().to(device)
-projector = Projector().to(device)
 
 
 def plot_losses(sum_losses, inv_losses, var_losses, cov_losses, step = "epochs"):
@@ -152,7 +159,6 @@ def plot_losses(sum_losses, inv_losses, var_losses, cov_losses, step = "epochs")
     plt.legend()
     plt.show()
 
-# train encoder
 
 def train_ssl(encoder, projector, gamma=25, mu=25, v=1, epochs=25):
     sum_losses, inv_losses, var_losses, cov_losses = [], [], [], []
@@ -227,20 +233,9 @@ def train_ssl(encoder, projector, gamma=25, mu=25, v=1, epochs=25):
         print(f"Epoch [{epoch + 1}/{num_epochs}], Covariance Loss: {cov_loss}")
         plot_losses(sum_losses_test, inv_losses_test, var_losses_test, cov_losses_test)
 
-train_ssl(encoder, projector)
 
-####
 ##  Q2   ##
-test_transform = transforms.Compose([
-    transforms.ToPILImage(),
-    transforms.ToTensor(),
-    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
-])
-
-test_dataset = CIFAR10(root='./data', train=False, download=True, transform=transforms.ToTensor())
-test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
-def show_pca_tsne(encoder):
+def show_pca_tsne(encoder, device, test_transform, test_dataloader):
     class_names = ['airplane', 'automobile', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
     encoder.eval()
     representations = []
@@ -286,12 +281,9 @@ def show_pca_tsne(encoder):
     c.ax.set_yticklabels(class_names)
     plt.show()
 
-show_pca_tsne(encoder)
 
-
-######
 ## Q3 - Linear probing
-def linear_probing(encoder, num_epochs=10):
+def linear_probing(encoder, test_dataloader, test_transform, num_epochs=10):
     epoch_losses = []
     epoch_acces = []
 
@@ -371,182 +363,195 @@ def linear_probing(encoder, num_epochs=10):
     plt.legend()
     plt.show()
 
-linear_probing(encoder)
 
-#####
 ### Q4: Ablation 1 - No Variance Term
-encoder_zero_var = Encoder().to(device)
-projector_zero_var = Projector().to(device)
-train_ssl(encoder_zero_var, projector_zero_var, mu=0, epochs=5)
-show_pca_tsne(encoder_zero_var)
-linear_probing(encoder_zero_var, num_epochs=20)
+def ablation_with_no_variance(encoder_zero_var, projector_zero_var, device, test_transform, test_dataloader):
+    train_ssl(encoder_zero_var, projector_zero_var, mu=0, epochs=5)
+    show_pca_tsne(encoder_zero_var, device, test_transform, test_dataloader)
+    linear_probing(encoder_zero_var, num_epochs=20)
 
-#####
-### Q6: Ablation 3 - No Generated Neighbors
-encoder.eval()
-representations = []
-with torch.no_grad():
-    for images, _ in dataloader:
-        images = images.to(device)
-        images = [train_transform(images[i]) for i in range(len(images))]
-        images = torch.stack(images).to(device)
-        features = encoder.encode(images)
-        representations.append(features.cpu().numpy())
-representations = np.concatenate(representations, axis=0)
 
-n_neighbors = 4  # Including the image itself
-neighbors = NearestNeighbors(n_neighbors=n_neighbors).fit(representations)
-_, indices = neighbors.kneighbors(representations)
+### Q6: Ablation 3 - No Generated Neighbors_neighbors
+def ablation_no_generated_neighbors(encoder, dataloader, device):
+    encoder.eval()
+    representations = []
+    with torch.no_grad():
+        for images, _ in dataloader:
+            images = images.to(device)
+            images = [train_transform(images[i]) for i in range(len(images))]
+            images = torch.stack(images).to(device)
+            features = encoder.encode(images)
+            representations.append(features.cpu().numpy())
+    representations = np.concatenate(representations, axis=0)
 
-encoder3 = Encoder().to(device)
-encoder3 = encoder3.train()
-projector3 = Projector().to(device)
-projector3 = projector3.train()
-optimizer = optim.Adam(list(encoder3.parameters()) + list(projector3.parameters()), lr=3e-4, betas=(0.9, 0.999), weight_decay=1e-6)
+    n_neighbors = 4  # Including the image itself
+    neighbors = NearestNeighbors(n_neighbors=n_neighbors).fit(representations)
+    _, indices = neighbors.kneighbors(representations)
 
-for epoch in range(1):
-    i = 0
-    for images, labels in dataloader:
-        images = images.to(device)
-        labels = labels.to(device)
+    encoder3 = Encoder().to(device)
+    encoder3 = encoder3.train()
+    projector3 = Projector().to(device)
+    projector3 = projector3.train()
+    optimizer = optim.Adam(list(encoder3.parameters()) + list(projector3.parameters()), lr=3e-4, betas=(0.9, 0.999), weight_decay=1e-6)
 
-        optimizer.zero_grad()
-        # neighbor images init
-        batch_indices = indices[len(images) * (i):len(images) * (i + 1), :]
-        random_choice = np.random.randint(1, 4, size=(len(images),))
-        batch_indices = batch_indices[np.arange(len(images)), random_choice]
-        neighbor_images = torch.stack([dataset[idx][0] for idx in batch_indices], dim=0).to(device)
-        # view 1 - the image itself
-        images = [train_transform(images[i]) for i in range(len(images))]
-        images = torch.stack(images).to(device)
-        Y = encoder3(images)
-        view1 = projector3(Y)
-        # view 2 - the neighbor image
-        augmented_images_prime = [train_transform(neighbor_images[i]) for i in range(len(neighbor_images))]
-        augmented_images_prime = torch.stack(augmented_images_prime).to(device)
-        Y_prime = encoder3(augmented_images_prime)
-        view2 = projector3(Y_prime)
-        # loss stage
-        inv_loss, var_loss, cov_loss = combined_loss(view1, view2)
-        loss = inv_loss + var_loss + cov_loss
+    for epoch in range(1):
+        i = 0
+        for images, labels in dataloader:
+            images = images.to(device)
+            labels = labels.to(device)
 
-        loss.backward()
-        optimizer.step()
-        i += 1
+            optimizer.zero_grad()
+            # neighbor images init
+            batch_indices = indices[len(images) * (i):len(images) * (i + 1), :]
+            random_choice = np.random.randint(1, 4, size=(len(images),))
+            batch_indices = batch_indices[np.arange(len(images)), random_choice]
+            neighbor_images = torch.stack([dataset[idx][0] for idx in batch_indices], dim=0).to(device)
+            # view 1 - the image itself
+            images = [train_transform(images[i]) for i in range(len(images))]
+            images = torch.stack(images).to(device)
+            Y = encoder3(images)
+            view1 = projector3(Y)
+            # view 2 - the neighbor image
+            augmented_images_prime = [train_transform(neighbor_images[i]) for i in range(len(neighbor_images))]
+            augmented_images_prime = torch.stack(augmented_images_prime).to(device)
+            Y_prime = encoder3(augmented_images_prime)
+            view2 = projector3(Y_prime)
+            # loss stage
+            inv_loss, var_loss, cov_loss = combined_loss(view1, view2)
+            loss = inv_loss + var_loss + cov_loss
 
-linear_probing(encoder3, num_epochs=20)
+            loss.backward()
+            optimizer.step()
+            i += 1
 
-#####
+    linear_probing(encoder3, num_epochs=20)
+
 ### Q8
-representations1 = representations
+def Q8(encoder3, representations):
+    representations1 = representations
 
-encoder3.eval()
-representations3 = []
+    encoder3.eval()
+    representations3 = []
 
-with torch.no_grad():
-    for images, _ in dataloader:
-        images = images.to(device)
-        images = [train_transform(images[i]) for i in range(len(images))]
-        images = torch.stack(images).to(device)
-        features = encoder3.encode(images)
-        representations3.append(features.cpu().numpy())
+    with torch.no_grad():
+        for images, _ in dataloader:
+            images = images.to(device)
+            images = [train_transform(images[i]) for i in range(len(images))]
+            images = torch.stack(images).to(device)
+            features = encoder3.encode(images)
+            representations3.append(features.cpu().numpy())
 
-representations3 = np.concatenate(representations3, axis=0)
+    representations3 = np.concatenate(representations3, axis=0)
 
-encoder.eval()
-encoder3.eval()
+    encoder.eval()
+    encoder3.eval()
 
-class_indices = [[] for _ in range(10)]
-for idx, label in enumerate(dataset.targets):
-    class_indices[label].append(idx)
-class_indices = [random.choice(indices) for indices in class_indices]
+    class_indices = [[] for _ in range(10)]
+    for idx, label in enumerate(dataset.targets):
+        class_indices[label].append(idx)
+    class_indices = [random.choice(indices) for indices in class_indices]
 
-# print("class_indices", class_indices)
+    # print("class_indices", class_indices)
 
-nearest_neighbors = []
-farthest_neighbors = []
+    nearest_neighbors = []
+    farthest_neighbors = []
 
-with torch.no_grad():
-    for idx in class_indices:
-        image, _ = dataset[idx]
-        image = image.unsqueeze(0).to(device)
+    with torch.no_grad():
+        for idx in class_indices:
+            image, _ = dataset[idx]
+            image = image.unsqueeze(0).to(device)
 
-        neighbors1 = NearestNeighbors(n_neighbors=6).fit(representations1)
-        _, nearest_indices1 = neighbors1.kneighbors(representations1)
+            neighbors1 = NearestNeighbors(n_neighbors=6).fit(representations1)
+            _, nearest_indices1 = neighbors1.kneighbors(representations1)
 
-        neighbors3 = NearestNeighbors(n_neighbors=6).fit(representations3)
-        _, nearest_indices3 = neighbors3.kneighbors(representations3)
-        nearest_images1 = [dataset[i] for i in nearest_indices1[idx].squeeze()]
-        nearest_images3 = [dataset[i] for i in nearest_indices3[idx].squeeze()]
-        nearest_neighbors.append((image, nearest_images1, nearest_images3))
+            neighbors3 = NearestNeighbors(n_neighbors=6).fit(representations3)
+            _, nearest_indices3 = neighbors3.kneighbors(representations3)
+            nearest_images1 = [dataset[i] for i in nearest_indices1[idx].squeeze()]
+            nearest_images3 = [dataset[i] for i in nearest_indices3[idx].squeeze()]
+            nearest_neighbors.append((image, nearest_images1, nearest_images3))
 
-        # find the 5 modt distance values
-        farthest_indices1 = np.argsort(
-            pairwise_distances(np.reshape(representations1[idx], (1, -1)), representations1, metric='euclidean'))[0][
-                            -5:]
-        farthest_indices3 = np.argsort(
-            pairwise_distances(np.reshape(representations3[idx], (1, -1)), representations3, metric='euclidean'))[0][
-                            -5:]
-        farthest_images1 = [dataset[i] for i in farthest_indices1]
-        farthest_images3 = [dataset[i] for i in farthest_indices3]
-        farthest_neighbors.append((image, farthest_images1, farthest_images3))
+            # find the 5 modt distance values
+            farthest_indices1 = np.argsort(
+                pairwise_distances(np.reshape(representations1[idx], (1, -1)), representations1, metric='euclidean'))[0][
+                                -5:]
+            farthest_indices3 = np.argsort(
+                pairwise_distances(np.reshape(representations3[idx], (1, -1)), representations3, metric='euclidean'))[0][
+                                -5:]
+            farthest_images1 = [dataset[i] for i in farthest_indices1]
+            farthest_images3 = [dataset[i] for i in farthest_indices3]
+            farthest_neighbors.append((image, farthest_images1, farthest_images3))
 
-for i, (image, nearest1, nearest3) in enumerate(nearest_neighbors):
-    plt.figure(figsize=(12, 4))
-    plt.subplot(1, 6, 1)
-    plt.imshow(image.squeeze().cpu().numpy().transpose((1, 2, 0)))
-    plt.title('Original - Q1')
-    plt.axis('off')
-
-    for j, neighbor in enumerate(nearest1):
-        if j == 0:
-            continue
-        plt.subplot(1, 6, j + 1)
-        plt.imshow(neighbor[0].squeeze().cpu().numpy().transpose((1, 2, 0)))
-        plt.title(f"near {j + 1}")
-        plt.axis('off')
-    plt.show()
-
-    plt.figure(figsize=(12, 4))
-    plt.subplot(1, 6, 1)
-    plt.imshow(image.squeeze().cpu().numpy().transpose((1, 2, 0)))
-    plt.title('Original - Q3')
-    plt.axis('off')
-
-    for j, neighbor in enumerate(nearest3):
-        if j == 0:
-            continue
-        plt.subplot(1, 6, j + 1)
-        plt.imshow(neighbor[0].squeeze().cpu().numpy().transpose((1, 2, 0)))
-        plt.title(f"near {j + 1}")
-        plt.axis('off')
-    plt.show()
-
-# Plotting the farthest neighbors
-for i, (image, farthest1, farthest3) in enumerate(farthest_neighbors):
-    plt.figure(figsize=(12, 4))
-    plt.subplot(1, 6, 1)
-    plt.imshow(image.squeeze().cpu().numpy().transpose((1, 2, 0)))
-    plt.title('Original - Q1')
-    plt.axis('off')
-
-    for j, neighbor in enumerate(farthest1):
-        plt.subplot(1, 6, j + 2)
-        plt.imshow(neighbor[0].squeeze().cpu().numpy().transpose((1, 2, 0)))
-        plt.title(f"far {j + 1}")
-        plt.axis('off')
-    plt.show()
-
-    plt.figure(figsize=(12, 4))
-    plt.subplot(1, 6, 1)
-    plt.imshow(image.squeeze().cpu().numpy().transpose((1, 2, 0)))
-    plt.title('Original - Q3')
-    plt.axis('off')
-
-    for j, neighbor in enumerate(farthest3):
-        plt.subplot(1, 6, j + 2)
-        plt.imshow(neighbor[0].squeeze().cpu().numpy().transpose((1, 2, 0)))
-        plt.title(f"far {j + 1}")
+    for i, (image, nearest1, nearest3) in enumerate(nearest_neighbors):
+        plt.figure(figsize=(12, 4))
+        plt.subplot(1, 6, 1)
+        plt.imshow(image.squeeze().cpu().numpy().transpose((1, 2, 0)))
+        plt.title('Original - Q1')
         plt.axis('off')
 
-    plt.show()
+        for j, neighbor in enumerate(nearest1):
+            if j == 0:
+                continue
+            plt.subplot(1, 6, j + 1)
+            plt.imshow(neighbor[0].squeeze().cpu().numpy().transpose((1, 2, 0)))
+            plt.title(f"near {j + 1}")
+            plt.axis('off')
+        plt.show()
+
+        plt.figure(figsize=(12, 4))
+        plt.subplot(1, 6, 1)
+        plt.imshow(image.squeeze().cpu().numpy().transpose((1, 2, 0)))
+        plt.title('Original - Q3')
+        plt.axis('off')
+
+        for j, neighbor in enumerate(nearest3):
+            if j == 0:
+                continue
+            plt.subplot(1, 6, j + 1)
+            plt.imshow(neighbor[0].squeeze().cpu().numpy().transpose((1, 2, 0)))
+            plt.title(f"near {j + 1}")
+            plt.axis('off')
+        plt.show()
+
+    # Plotting the farthest neighbors
+    for i, (image, farthest1, farthest3) in enumerate(farthest_neighbors):
+        plt.figure(figsize=(12, 4))
+        plt.subplot(1, 6, 1)
+        plt.imshow(image.squeeze().cpu().numpy().transpose((1, 2, 0)))
+        plt.title('Original - Q1')
+        plt.axis('off')
+
+        for j, neighbor in enumerate(farthest1):
+            plt.subplot(1, 6, j + 2)
+            plt.imshow(neighbor[0].squeeze().cpu().numpy().transpose((1, 2, 0)))
+            plt.title(f"far {j + 1}")
+            plt.axis('off')
+        plt.show()
+
+        plt.figure(figsize=(12, 4))
+        plt.subplot(1, 6, 1)
+        plt.imshow(image.squeeze().cpu().numpy().transpose((1, 2, 0)))
+        plt.title('Original - Q3')
+        plt.axis('off')
+
+        for j, neighbor in enumerate(farthest3):
+            plt.subplot(1, 6, j + 2)
+            plt.imshow(neighbor[0].squeeze().cpu().numpy().transpose((1, 2, 0)))
+            plt.title(f"far {j + 1}")
+            plt.axis('off')
+
+        plt.show()
+
+
+if __name__ == '__main__':
+    train_transform, test_transform = init_transforms()
+    device, batch_size, dataset, dataloader, test_dataset, test_dataloader = init_dataset()
+    encoder, projector = init_models(device)
+
+    train_ssl(encoder, projector)
+
+    show_pca_tsne(encoder, device, test_transform, test_dataloader)
+
+    linear_probing(encoder, test_dataloader, test_transform)
+
+    encoder_zero_var, projector_zero_var = init_models(device)
+    ablation_with_no_variance(encoder_zero_var, projector_zero_var, device, test_transform, test_dataloader)

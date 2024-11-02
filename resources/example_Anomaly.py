@@ -9,11 +9,10 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
 import numpy as np
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
 from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics import roc_curve, auc
-from sklearn.metrics.pairwise import pairwise_distances
+
+
 batch_size = 256
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 dataset = CIFAR10(root='./data', train=True, download=True, transform=transforms.ToTensor())

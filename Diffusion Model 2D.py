@@ -1,11 +1,11 @@
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import numpy as np
 import matplotlib.pyplot as plt
 
 
-### PART 1.1 Unconditional Diffuusion Model
+### Unconditional Diffusion Model
 ### Main function
 def main_part_1_1_Unconditional_Diffusion_Model():
     denoiser, outputs, inputs, x0, dt, losses, n_points, T = Model_init_and_training_Unconditional_Diffusion_Model()

@@ -1,19 +1,14 @@
 import torch
 import torch.nn as nn
 from torchvision.models import resnet18
-import torch.optim as optim
 import torchvision.transforms as transforms
 from torchvision.datasets import CIFAR10, MNIST
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
-import torch.nn.functional as F
 import numpy as np
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
 from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics import roc_curve, auc
-import random
-from sklearn.metrics.pairwise import pairwise_distances
+
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 batch_size = 256
