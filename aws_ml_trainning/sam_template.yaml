@@ -1,0 +1,60 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  CodePackageDate:
+    Description: The date of the code package in ms.
+    Type: String
+
+Resources:
+  InternalAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      EndpointConfiguration: 
+        Type: PUBLIC  # Change to PUBLIC if public access is desired
+      Name: training-job-queue
+      StageName: prod
+
+  DynamoSMQueue:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: jobName
+        Type: String
+      TableName: sagemaker-queue
+
+  ManagedTrainingJobQueue:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri:
+        Bucket:
+          Fn::ImportValue: !Sub ml-code-bucket-name
+        Key: !Sub ${CodePackageDate}-code-package.zip
+      Handler: lambda_handler.lambda_handler  # Verify this function exists in lambda_handler.py
+      Runtime: python3.12
+      Architectures:
+        - arm64  # Use Graviton
+      Policies:
+        - !Sub "arn:aws:iam::aws:policy/AmazonSageMakerFullAccess"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DynamoSMQueue
+      Events:
+        CreateTraining:
+          Type: Api
+          Properties:
+            Path: /add-job
+            Method: post
+            RestApiId: !Ref InternalAPI  # Ensure InternalAPI is configured correctly
+        SageMakerEvent:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.sagemaker
+              detail-type:
+                - "SageMaker Training Job State Change"
+              detail:
+                TrainingJobStatus:
+                  - "Completed"
+                  - "Failed"
+                  - "Stopped"
